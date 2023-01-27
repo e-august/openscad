@@ -3,6 +3,9 @@
 #include "node.h"
 #include "Value.h"
 
+#ifdef ENABLE_PYTHON
+#include <Python.h>
+#endif
 class RotateExtrudeNode : public AbstractPolyNode
 {
 public:
@@ -21,4 +24,8 @@ public:
   double origin_x, origin_y, scale, angle;
   Filename filename;
   std::string layername;
+ #ifdef ENABLE_PYTHON
+  double twist;
+  PyObject *profile_func;
+ #endif  
 };

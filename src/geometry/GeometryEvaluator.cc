@@ -34,6 +34,9 @@
 #include <CGAL/convex_hull_2.h>
 #include <CGAL/Point_2.h>
 
+#ifdef ENABLE_PYTHON
+#include <pyopenscad.h>
+#endif
 class Geometry;
 class Polygon2d;
 class Tree;
@@ -1007,6 +1010,36 @@ static Outline2d splitOutlineByFn(
   return o2;
 }
 
+void  append_linear_vertex(PolySet *ps,const Outline2d *face, int index, double h)
+{
+	ps->append_vertex(
+			face->vertices[index][0],
+			face->vertices[index][1],
+			h);
+}
+
+void  append_rotary_vertex(PolySet *ps,const Outline2d *face, int index, double ang)
+{
+	double a=ang*M_PI / 180.0;
+	ps->append_vertex(
+			face->vertices[index][0]*cos(a),
+			face->vertices[index][0]*sin(a),
+			face->vertices[index][1]);
+}
+
+
+std::vector<Vector3d> calculate_path_profile(Vector3d *vec_x, Vector3d *vec_y,Vector3d curpt, const std::vector<Vector2d> &profile) {
+
+	std::vector<Vector3d> result;
+	for(int i=0;i<profile.size();i++) {
+		result.push_back( Vector3d(
+			curpt[0]+(*vec_x)[0]*profile[i][0]+(*vec_y)[0]*profile[i][1],
+			curpt[1]+(*vec_x)[1]*profile[i][0]+(*vec_y)[1]*profile[i][1],
+			curpt[2]+(*vec_x)[2]*profile[i][0]+(*vec_y)[2]*profile[i][1]
+				));
+	}
+	return result;
+}
 
 /*!
    Input to extrude should be sanitized. This means non-intersecting, correct winding order
@@ -1119,6 +1152,66 @@ static Geometry *extrudePolygon(const LinearExtrudeNode& node, const Polygon2d& 
     h2 = node.height;
   }
 
+#ifdef ENABLE_PYTHON  
+  if(node.profile_func != NULL)
+  {
+	Outline2d lowerFace;
+	Outline2d upperFace;
+	double lower_h=h1, upper_h=h2;
+	double lower_scalex=1.0, upper_scalex=1.0;
+	double lower_scaley=1.0, upper_scaley=1.0;
+	double lower_rot=0.0, upper_rot=0.0;
+
+	// Add Bottom face
+	lowerFace = python_getprofile(node.profile_func, 0,lower_scalex, lower_scaley,node.origin_x, node.origin_y, lower_rot);
+	Polygon2d botface;
+        botface.addOutline(lowerFace);
+    	PolySet *ps_bot = botface.tessellate();
+	translate_PolySet(*ps_bot, Vector3d(0, 0, lower_h));
+  	for (auto& p : ps_bot->polygons) {
+	    std::reverse(p.begin(), p.end());
+	}
+	ps->append(*ps_bot);
+	delete ps_bot;
+  	for (unsigned int i = 1; i <= slices; i++) {
+		upper_h=i*node.height/slices;
+    		upper_scalex = 1 - i * (1 - node.scale_x) / slices,
+    		upper_scaley = 1 - i * (1 - node.scale_y) / slices,
+		upper_rot=i*node.twist /slices;
+		if(node.center) upper_h -= node.height/2;
+		upperFace = python_getprofile(node.profile_func, upper_h, upper_scalex, upper_scaley , node.origin_x, node.origin_y, upper_rot);
+		if(lowerFace.vertices.size() == upperFace.vertices.size()) {
+			unsigned int n=lowerFace.vertices.size();
+			for(unsigned int j=0;j<n;j++) {
+				ps->append_poly();
+				append_linear_vertex(ps,&lowerFace,(j+0)%n, lower_h);
+				append_linear_vertex(ps,&lowerFace,(j+1)%n, lower_h);
+				append_linear_vertex(ps,&upperFace,(j+1)%n, upper_h);
+
+				ps->append_poly();
+				append_linear_vertex(ps,&lowerFace,(j+0)%n, lower_h);
+				append_linear_vertex(ps,&upperFace,(j+1)%n, upper_h);
+				append_linear_vertex(ps,&upperFace,(j+0)%n, upper_h);
+			}
+		}
+
+		lowerFace = upperFace;
+		lower_h = upper_h;
+		lower_scalex = upper_scalex;
+		lower_scaley = upper_scaley;
+		lower_rot = upper_rot;
+	}
+	// Add Top face
+	Polygon2d topface;
+        topface.addOutline(upperFace);
+    	PolySet *ps_top = topface.tessellate();
+	translate_PolySet(*ps_top, Vector3d(0, 0, upper_h));
+	ps->append(*ps_top);
+	delete ps_top;
+  }
+  else
+#endif  
+{
   // Create bottom face.
   PolySet *ps_bottom = polyref.tessellate(); // bottom
   // Flip vertex ordering for bottom polygon
@@ -1153,6 +1246,7 @@ static Geometry *extrudePolygon(const LinearExtrudeNode& node, const Polygon2d& 
     ps->append(*ps_top);
     delete ps_top;
   }
+}
 
   return ps;
 }
@@ -1258,6 +1352,77 @@ static Geometry *rotatePolygon(const RotateExtrudeNode& node, const Polygon2d& p
 
   bool flip_faces = (min_x >= 0 && node.angle > 0 && node.angle != 360) || (min_x < 0 && (node.angle < 0 || node.angle == 360));
 
+#ifdef ENABLE_PYTHON  
+  if(node.profile_func != NULL)
+  {
+	fragments=node.fn; // TODO fix
+	Outline2d lastFace;
+	Outline2d curFace;
+	double last_ang=0, cur_ang=0;
+	double last_rot=0.0, cur_rot=0.0;
+	double last_twist=0.0, cur_twist=0.0;
+
+	if(node.angle != 360) {
+		// Add initial closing
+		lastFace = python_getprofile(node.profile_func, 0,1.0, 1.0,node.origin_x, node.origin_y, last_rot);
+		Polygon2d lastface;
+	        lastface.addOutline(lastFace);
+    		PolySet *ps_last = lastface.tessellate();
+
+		Transform3d rot(angle_axis_degrees(90, Vector3d::UnitX()));
+		ps_last->transform(rot);
+		// Flip vertex ordering
+		if (!flip_faces) {
+		for (auto& p : ps_last->polygons) {
+		std::reverse(p.begin(), p.end());
+		}
+		}
+		ps->append(*ps_last);
+		delete ps_last;
+
+	}
+  	for (unsigned int i = 1; i <= fragments; i++) {
+		cur_ang=i*node.angle/fragments;
+		cur_twist=i*node.twist /fragments;
+		curFace = python_getprofile(node.profile_func, cur_ang, 1.0, 1.0 , node.origin_x, node.origin_y, cur_twist);
+
+		if(lastFace.vertices.size() == curFace.vertices.size()) {
+			unsigned int n=lastFace.vertices.size();
+			for(unsigned int j=0;j<n;j++) {
+				ps->append_poly();
+				append_rotary_vertex(ps,&lastFace,(j+0)%n, last_ang);
+				append_rotary_vertex(ps,&lastFace,(j+1)%n, last_ang);
+				append_rotary_vertex(ps,&curFace,(j+1)%n, cur_ang);
+				ps->append_poly();
+				append_rotary_vertex(ps,&lastFace,(j+0)%n, last_ang);
+				append_rotary_vertex(ps,&curFace,(j+1)%n, cur_ang);
+				append_rotary_vertex(ps,&curFace,(j+0)%n, cur_ang);
+			}
+		}
+
+		lastFace = curFace;
+		last_ang = cur_ang;
+		last_twist = cur_twist;
+	}
+	if(node.angle != 360) {
+		Polygon2d curface;
+	        curface.addOutline(curFace);
+    		PolySet *ps_cur = curface.tessellate();
+		Transform3d rot2(angle_axis_degrees(node.angle, Vector3d::UnitZ()) * angle_axis_degrees(90, Vector3d::UnitX()));
+		ps_cur->transform(rot2);
+		if (flip_faces) {
+			for (auto& p : ps_cur->polygons) {
+				std::reverse(p.begin(), p.end());
+			}
+		}
+		ps->append(*ps_cur);
+		delete ps_cur;
+	}
+	  
+}
+  else
+#endif
+  {	  
   if (node.angle != 360) {
     PolySet *ps_start = poly.tessellate(); // starting face
     Transform3d rot(angle_axis_degrees(90, Vector3d::UnitX()));
@@ -1307,7 +1472,7 @@ static Geometry *rotatePolygon(const RotateExtrudeNode& node, const Polygon2d& p
       }
     }
   }
-
+  }
   return ps;
 }
 

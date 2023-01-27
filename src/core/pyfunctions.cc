@@ -778,42 +778,51 @@ PyObject *python_rotate_extrude(PyObject *self, PyObject *args, PyObject *kwargs
   int convexity = 1;
   double scale = 1.0;
   double angle = 360.0;
+  double twist=0.0;
   PyObject *origin = NULL;
   double fn = -1, fa = -1, fs = -1;
 
+  get_fnas(fn,fa,fs);
 
-  char *kwlist[] = {"obj", "layer", "convexity", "scale", "fn", "fa", "fs", NULL};
+  char * kwlist[] = {"obj", "layer", "convexity", "scale", "angle", "twist", "origin", "fn", "fa", "fs", NULL};
 
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|siddO!ddd", kwlist,
-                                   &obj,
-                                   &layer,
-                                   &convexity,
-                                   &scale,
-                                   &angle,
-                                   &PyList_Type,
-                                   &origin,
-                                   &fn, &fa, &fs
-                                   )) {
+   if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|sidddOddd", kwlist, 
+                          &obj,
+			  &layer,
+			  &convexity,
+			  &scale,
+			  &angle,
+			  &twist,
+			  &origin,
+			  &fn,&fa,&fs
+                          )) {
 
     PyErr_SetString(PyExc_TypeError, "error duing parsing\n");
     return NULL;
   }
 
-  child = PyOpenSCADObjectToNodeMulti(obj);
-  if (child == NULL) {
-    PyErr_SetString(PyExc_TypeError, "Invalid type for  Object in rotate_extrude\n");
-    return NULL;
+  if(obj->ob_type == &PyFunction_Type) {
+	node->profile_func = obj;
+  	auto dummy_node = std::make_shared<SquareNode>(&todo_fix_inst);
+	node->children.push_back(dummy_node);
+  } else {
+  	child = PyOpenSCADObjectToNodeMulti(obj);
+	if(child == NULL) {
+        	PyErr_SetString(PyExc_TypeError,"Invalid type for  Object in rotate_extrude\n");
+	   	return NULL;
+  	}
+  	node->children.push_back(child);
   }
+   node->fn=fn;
+   node->fa=fa;
+   node->fs=fs;
+//   node->fn=20; // TODO fix
 
-  get_fnas(node->fn, node->fa, node->fs);
-  if (fn != -1) node->fn = fn;
-  if (fa != -1) node->fa = fa;
-  if (fs != -1) node->fs = fs;
-
-  if (layer != NULL) node->layername = layer;
+  if(layer != NULL) node->layername = layer;
   node->convexity = convexity;
   node->scale = scale;
   node->angle = angle;
+  node->twist = twist;
 
   if (origin != NULL && PyList_Check(origin) && PyList_Size(origin) == 2) {
     node->origin_x = PyFloat_AsDouble(PyList_GetItem(origin, 0));
@@ -826,7 +835,6 @@ PyObject *python_rotate_extrude(PyObject *self, PyObject *args, PyObject *kwargs
   if (node->scale <= 0) node->scale = 1;
   if ((node->angle <= -360) || (node->angle > 360)) node->angle = 360;
 
-  node->children.push_back(child);
   return PyOpenSCADObjectFromNode(&PyOpenSCADType, node);
 }
 
@@ -856,31 +864,38 @@ PyObject *python_linear_extrude(PyObject *self, PyObject *args, PyObject *kwargs
   double twist = 0.0;
   double fn = -1, fa = -1, fs = -1;
 
-  char *kwlist[] = {"obj", "height", "layer", "convexity", "origin", "scale", "center", "slices", "segments", "twist", "fn", "fa", "fs", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|dsiO!O!siidddd", kwlist,
-                                   &obj,
-                                   &height,
-                                   &layer,
-                                   &convexity,
-                                   &PyList_Type,
-                                   &origin,
-                                   &PyList_Type,
-                                   &scale,
-                                   &center,
-                                   &slices,
-                                   &segments,
-                                   &twist,
-                                   &fn, &fs, &fs
-                                   )) {
-    PyErr_SetString(PyExc_TypeError, "error duing parsing\n");
-    return NULL;
+  char * kwlist[] ={"obj","height","layer","convexity","origin","scale","center","slices","segments","twist","fn","fa","fs",NULL};
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|dsiOOsiidddd", kwlist, 
+                          &obj,
+                          &height,
+			  &layer,
+			  &convexity,
+			  &origin,
+			  &scale,
+			  &center,
+			  &slices,
+			  &segments,
+			  &twist,
+			  &fn,&fs,&fs
+                          )) {
+        PyErr_SetString(PyExc_TypeError,"error duing parsing\n");
+        return NULL;
   }
 
-  child = PyOpenSCADObjectToNodeMulti(obj);
-  if (child == NULL) {
-    PyErr_SetString(PyExc_TypeError, "Invalid type for  Object in lienar_extrude\n");
-    return NULL;
-  }
+  node->profile_func = NULL;
+  if(obj->ob_type == &PyFunction_Type) {
+	node->profile_func = obj;
+  	auto dummy_node = std::make_shared<SquareNode>(&todo_fix_inst);
+	node->children.push_back(dummy_node);
+  } else {
+	  child = PyOpenSCADObjectToNodeMulti(obj);
+	  if(child == NULL) {
+        	PyErr_SetString(PyExc_TypeError,"Invalid type for  Object in linear_extrude\n");
+	   	return NULL;
+	  }
+	  node->children.push_back(child);
+   }
+
 
   get_fnas(node->fn, node->fa, node->fs);
   if (fn != -1) node->fn = fn;
@@ -891,16 +906,22 @@ PyObject *python_linear_extrude(PyObject *self, PyObject *args, PyObject *kwargs
   node->convexity = convexity;
   if (layer != NULL) node->layername = layer;
 
-  node->origin_x = 0.0; node->origin_y = 0.0;
-  if (origin != NULL && PyList_Check(origin) && PyList_Size(origin) == 2) {
-    node->origin_x = PyFloat_AsDouble(PyList_GetItem(origin, 0));
-    node->origin_y = PyFloat_AsDouble(PyList_GetItem(origin, 1));
+  node->origin_x=0.0; node->origin_y=0.0;
+  if(origin != NULL) {
+	  double dummy;
+	  if(python_vectorval(origin,&(node->origin_x), &(node->origin_y), &dummy)) {
+    		PyErr_SetString(PyExc_TypeError,"error in linear_extrude origin parameter\n");
+		return NULL;
+	  }
   }
 
-  node->scale_x = 1.0; node->scale_y = 1.0;
-  if (scale != NULL && PyList_Check(scale) && PyList_Size(scale) == 2) {
-    node->scale_x = PyFloat_AsDouble(PyList_GetItem(scale, 0));
-    node->scale_y = PyFloat_AsDouble(PyList_GetItem(scale, 1));
+  node->scale_x=1.0; node->scale_y=1.0;
+  if(scale != NULL) {
+	  double dummy;
+	  if(python_vectorval(scale,&(node->scale_x), &(node->scale_y), &dummy)) {
+    		PyErr_SetString(PyExc_TypeError,"error in linear_extrude scale parameter\n");
+		return NULL;
+	  }
   }
 
   if (center != NULL)
@@ -915,15 +936,14 @@ PyObject *python_linear_extrude(PyObject *self, PyObject *args, PyObject *kwargs
   node->twist = twist;
   node->has_twist = twist != 1?1:0;
 
-  node->children.push_back(child);
-  return PyOpenSCADObjectFromNode(&PyOpenSCADType, node);
+  return PyOpenSCADObjectFromNode(&PyOpenSCADType,node);
 }
 
-PyObject *python_linear_extrude_oo(PyObject *self, PyObject *args, PyObject *kwargs)
+PyObject* python_linear_extrude_oo(PyObject *self, PyObject *args, PyObject *kwargs)
 {
-  PyObject *new_args = python_oo_args(self, args);
-  PyObject *result = python_linear_extrude(self, new_args, kwargs);
-  return result;
+	PyObject *new_args=python_oo_args(self,args);
+	PyObject *result = python_linear_extrude(self,new_args,kwargs);
+	return result;
 }
 
 PyObject *python_csg_sub(PyObject *self, PyObject *args, PyObject *kwargs, OpenSCADOperator mode)

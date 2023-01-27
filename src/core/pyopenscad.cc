@@ -289,6 +289,37 @@ static PyObject *PyInit_openscad(void)
 std::string todo_fix_name;
 AssignmentList todo_fix_asslist;
 ModuleInstantiation todo_fix_inst(todo_fix_name, todo_fix_asslist, Location::NONE);
+Outline2d python_getprofile(PyObject *cbfunc, double h,double scalex, double scaley, double origin_x, double origin_y,double rot)
+{
+	Outline2d result;
+	double ang=rot*3.14/180.0;
+	double s=sin(ang);
+	double c=cos(ang);
+	PyObject* args = PyTuple_Pack(1,PyFloat_FromDouble(h));
+	PyObject* polygon = PyObject_CallObject(cbfunc, args);
+	if(polygon && PyList_Check(polygon)) {
+		unsigned int n=PyList_Size(polygon);
+		for(unsigned int i=0;i < n;i++) {
+			PyObject *pypt = PyList_GetItem(polygon, i);
+			if(PyList_Check(pypt) && PyList_Size(pypt) == 2) {
+				double x=PyFloat_AsDouble(PyList_GetItem(pypt, 0))-origin_x;
+				double y=PyFloat_AsDouble(PyList_GetItem(pypt, 1))-origin_y;
+				double xr = scalex*(x*c - y*s)+origin_x;
+				double yr = scaley*(y*c + x*s)+origin_y;
+				result.vertices.push_back(Vector2d(xr,yr));
+			}
+		}
+	}
+	if(result.vertices.size() < 3)
+	{
+		Outline2d err;
+		err.vertices.push_back(Vector2d(0,0));
+		err.vertices.push_back(Vector2d(10,0));
+		err.vertices.push_back(Vector2d(10,10));
+		return err;
+	}
+	return result;
+}
 
 char *evaluatePython(const char *code)
 {
