@@ -1010,6 +1010,23 @@ static Outline2d splitOutlineByFn(
   return o2;
 }
 
+Outline2d alterprofile(Outline2d profile,double scalex, double scaley, double origin_x, double origin_y,double rot)
+{
+	Outline2d result;
+	double ang=rot*3.14/180.0;
+	double c=cos(ang);
+	double s=sin(ang);
+	int n=profile.vertices.size();
+	for(int i=0;i<n;i++) {
+		double x=profile.vertices[i][0]-origin_x;
+		double y=profile.vertices[i][1]-origin_y;
+		double xr = scalex*(x*c - y*s)+origin_x;
+		double yr = scaley*(y*c + x*s)+origin_y;
+		result.vertices.push_back(Vector2d(xr,yr));
+	}
+	return result;
+}
+
 void  append_linear_vertex(PolySet *ps,const Outline2d *face, int index, double h)
 {
 	ps->append_vertex(
@@ -1163,7 +1180,7 @@ static Geometry *extrudePolygon(const LinearExtrudeNode& node, const Polygon2d& 
 	double lower_rot=0.0, upper_rot=0.0;
 
 	// Add Bottom face
-	lowerFace = python_getprofile(node.profile_func, 0,lower_scalex, lower_scaley,node.origin_x, node.origin_y, lower_rot);
+	lowerFace = alterprofile(python_getprofile(node.profile_func, 0),lower_scalex, lower_scaley,node.origin_x, node.origin_y, lower_rot);
 	Polygon2d botface;
         botface.addOutline(lowerFace);
     	PolySet *ps_bot = botface.tessellate();
@@ -1179,7 +1196,7 @@ static Geometry *extrudePolygon(const LinearExtrudeNode& node, const Polygon2d& 
     		upper_scaley = 1 - i * (1 - node.scale_y) / slices,
 		upper_rot=i*node.twist /slices;
 		if(node.center) upper_h -= node.height/2;
-		upperFace = python_getprofile(node.profile_func, upper_h, upper_scalex, upper_scaley , node.origin_x, node.origin_y, upper_rot);
+		upperFace = alterprofile(python_getprofile(node.profile_func, upper_h), upper_scalex, upper_scaley , node.origin_x, node.origin_y, upper_rot);
 		if(lowerFace.vertices.size() == upperFace.vertices.size()) {
 			unsigned int n=lowerFace.vertices.size();
 			for(unsigned int j=0;j<n;j++) {
@@ -1364,7 +1381,7 @@ static Geometry *rotatePolygon(const RotateExtrudeNode& node, const Polygon2d& p
 
 	if(node.angle != 360) {
 		// Add initial closing
-		lastFace = python_getprofile(node.profile_func, 0,1.0, 1.0,node.origin_x, node.origin_y, last_rot);
+		lastFace = alterprofile(python_getprofile(node.profile_func, 0),1.0, 1.0,node.origin_x, node.origin_y, last_rot);
 		Polygon2d lastface;
 	        lastface.addOutline(lastFace);
     		PolySet *ps_last = lastface.tessellate();
@@ -1384,7 +1401,7 @@ static Geometry *rotatePolygon(const RotateExtrudeNode& node, const Polygon2d& p
   	for (unsigned int i = 1; i <= fragments; i++) {
 		cur_ang=i*node.angle/fragments;
 		cur_twist=i*node.twist /fragments;
-		curFace = python_getprofile(node.profile_func, cur_ang, 1.0, 1.0 , node.origin_x, node.origin_y, cur_twist);
+		curFace = alterprofile(python_getprofile(node.profile_func, cur_ang), 1.0, 1.0 , node.origin_x, node.origin_y, cur_twist);
 
 		if(lastFace.vertices.size() == curFace.vertices.size()) {
 			unsigned int n=lastFace.vertices.size();
